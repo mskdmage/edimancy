@@ -1,11 +1,4 @@
-use crate::result::Result;
-use crate::error::Error;
-
-#[derive(Debug, Clone)]
-pub struct Segment {
-    pub segment_id : Vec<u8>,
-    pub body : Vec<u8>,
-}
+use crate::{components::{element::{Element, ElementConfig}}, error::Error, result::Result};
 
 #[derive(Debug, Clone)]
 pub struct SegmentConfig {
@@ -13,6 +6,11 @@ pub struct SegmentConfig {
     pub element_separator: u8,
 }
 
+#[derive(Debug, Clone)]
+pub struct Segment {
+    pub segment_id : Vec<u8>,
+    pub body : Vec<u8>,
+}
 
 impl Segment {
     pub fn from_bytes(bytes: &[u8], config: &SegmentConfig) -> Result<Self> {
@@ -52,5 +50,74 @@ impl Segment {
             segment_id: segment_id_bytes.to_vec(),
             body: body_bytes.to_vec(),
         })
+    }
+
+    pub fn elements<'a>(
+        &'a self,
+        seg_config: &'a SegmentConfig,
+        elem_config: &'a ElementConfig,
+    ) -> impl Iterator<Item = Result<Element<'a>>> + 'a {
+        self.body
+            .split(move |&b| b == seg_config.element_separator)
+            .map(move |part| Element::from_bytes(part, elem_config))
+    }
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn segment_id_should_return_ok() {
+        let payload = b"ISA*REST";
+        let seg_config = SegmentConfig { terminator: b'~', element_separator: b'*' };
+
+        let res = Segment::from_bytes(payload, &seg_config).unwrap();
+
+        assert_eq!(res.segment_id, b"ISA");
+        assert_eq!(res.body, b"REST");
+    }
+
+    #[test]
+    fn segment_with_terminator_includes_terminator_in_len() {
+        let payload = b"ISA*REST~";
+        let seg_config = SegmentConfig { terminator: b'~', element_separator: b'*' };
+
+        let res = Segment::from_bytes(payload, &seg_config).unwrap();
+
+        assert_eq!(res.segment_id, b"ISA");
+        assert_eq!(res.body, b"REST");
+    }
+
+    #[test]
+    fn body_can_be_empty() {
+        let payload = b"ISA*";
+        let seg_config = SegmentConfig { terminator: b'~', element_separator: b'*' };
+
+        let res = Segment::from_bytes(payload, &seg_config).unwrap();
+
+        assert_eq!(res.segment_id, b"ISA");
+        assert_eq!(res.body, b"");
+    }
+
+    #[test]
+    fn header_empty_should_fail() {
+        let payload = b"*REST";
+        let seg_config = SegmentConfig { terminator: b'~', element_separator: b'*' };
+
+        let res = Segment::from_bytes(payload, &seg_config);
+
+        assert!(res.is_err());
+    }
+
+    #[test]
+    fn missing_separator_should_fail() {
+        let payload = b"ISARESTOFEDI";
+        let seg_config = SegmentConfig { terminator: b'~', element_separator: b'*' };
+
+        let res = Segment::from_bytes(payload, &seg_config);
+
+        assert!(res.is_err());
     }
 }
